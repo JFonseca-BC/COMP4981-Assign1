@@ -1,0 +1,28 @@
+digraph FSM {
+    rankdir=LR;
+    node [shape=box];
+    START [shape=circle];
+    EXIT [shape=doublecircle];
+    USAGE;
+    INIT;
+    EVENT_LOOP;
+    ACCEPT_CLIENT;
+    HANDLE_IO;
+    CLEANUP;
+
+    START -> INIT [label="parse_args"];
+    START -> USAGE [label="invalid_args"];
+    USAGE -> EXIT;
+
+    INIT -> EVENT_LOOP [label="setup_server"];
+    INIT -> USAGE [label="setup_fail"];
+
+    EVENT_LOOP -> ACCEPT_CLIENT [label="poll (new conn)"];
+    EVENT_LOOP -> HANDLE_IO [label="poll (data ready)"];
+    EVENT_LOOP -> CLEANUP [label="signal/stop"];
+
+    ACCEPT_CLIENT -> EVENT_LOOP [label="add_to_poll"];
+    HANDLE_IO -> EVENT_LOOP [label="response_sent"];
+
+    CLEANUP -> EXIT;
+}
