@@ -107,10 +107,10 @@ void send_response(int client_fd, int status_code, const char *status_text,
 void serve_file(int client_fd, const char *path, int is_head) {
   char full_path[BUFFER_SIZE];
   FILE *file = NULL;
-  long fsize_raw = 0;
-  size_t fsize = 0;
 
+  /* TRAVERSAL FIX: Block and send response immediately */
   if (strstr(path, "..") != NULL) {
+    log_message("WARN", "Traversal attempt blocked: %s", path);
     send_response(client_fd, HTTP_FORBIDDEN, "Forbidden", "text/plain",
                   "403 Forbidden", is_head);
     return;
@@ -130,25 +130,29 @@ void serve_file(int client_fd, const char *path, int is_head) {
     return;
   }
 
-  (void)fseek(file, 0, SEEK_END);
-  fsize_raw = ftell(file);
-  fsize = (fsize_raw > 0) ? (size_t)fsize_raw : 0;
-  (void)fseek(file, 0, SEEK_SET);
-
   {
-    char *const file_content = malloc(fsize + 1);
-    if (file_content != NULL) {
-      const char *ctype = "text/plain"; /* Reduced scope to fix cppcheck */
-      (void)fread(file_content, 1, fsize, file);
-      file_content[fsize] = '\0';
+    long fsize_raw = 0;
+    size_t fsize = 0;
+    (void)fseek(file, 0, SEEK_END);
+    fsize_raw = ftell(file);
+    fsize = (fsize_raw > 0) ? (size_t)fsize_raw : 0;
+    (void)fseek(file, 0, SEEK_SET);
 
-      if (strstr(full_path, ".html") != NULL) {
-        ctype = "text/html";
+    {
+      char *const file_content = malloc(fsize + 1);
+      if (file_content != NULL) {
+        const char *ctype = "text/plain";
+        (void)fread(file_content, 1, fsize, file);
+        file_content[fsize] = '\0';
+
+        if (strstr(full_path, ".html") != NULL) {
+          ctype = "text/html";
+        }
+
+        send_response(client_fd, HTTP_OK, "OK", ctype, file_content, is_head);
+        log_message("INFO", "Served: %s (%zu bytes)", full_path, fsize);
+        free(file_content);
       }
-
-      send_response(client_fd, HTTP_OK, "OK", ctype, file_content, is_head);
-      log_message("INFO", "Served: %s (%zu bytes)", full_path, fsize);
-      free(file_content);
     }
   }
   (void)fclose(file);
@@ -157,14 +161,12 @@ void serve_file(int client_fd, const char *path, int is_head) {
 /* --- Request Handler --- */
 void handle_client(int client_fd) {
   char buffer[BUFFER_SIZE];
-  ssize_t bytes_read = 0;
-
-  bytes_read = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
+  ssize_t bytes_read = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
 
   if (bytes_read > 0) {
-    char method[METHOD_BUF_SIZE];  /* Reduced scope to fix cppcheck */
-    char path[PATH_BUF_SIZE];      /* Reduced scope to fix cppcheck */
-    char protocol[PROTO_BUF_SIZE]; /* Reduced scope to fix cppcheck */
+    char method[METHOD_BUF_SIZE];
+    char path[PATH_BUF_SIZE];
+    char protocol[PROTO_BUF_SIZE];
     int parsed = 0;
 
     buffer[bytes_read] = '\0';
@@ -176,11 +178,13 @@ void handle_client(int client_fd) {
       } else if (strcmp(method, "HEAD") == 0) {
         serve_file(client_fd, path, 1);
       } else {
+        log_message("WARN", "Method not implemented: %s", method);
         send_response(client_fd, HTTP_NOT_IMPLEMENTED, "Not Implemented",
                       "text/plain", "501 Not Implemented", 0);
       }
     }
   }
+  /* ENSURE CONNECTION CLOSES FOR ALL REQUESTS */
   (void)close(client_fd);
 }
 
